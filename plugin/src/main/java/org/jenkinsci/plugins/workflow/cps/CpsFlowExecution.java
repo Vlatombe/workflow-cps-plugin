@@ -49,6 +49,8 @@ import hudson.ExtensionList;
 import hudson.model.Action;
 import hudson.model.Result;
 import hudson.util.Iterators;
+import java.io.BufferedReader;
+import java.io.FileReader;
 import jenkins.model.CauseOfInterruption;
 import jenkins.model.Jenkins;
 import org.jboss.marshalling.Unmarshaller;
@@ -911,7 +913,16 @@ public class CpsFlowExecution extends FlowExecution implements BlockableResume {
      */
     private void loadProgramFailed(final Throwable problem, SettableFuture<CpsThreadGroup> promise) {
         try {
-            Functions.printStackTrace(problem, owner.getListener().getLogger());
+            var logger = owner.getListener().getLogger();
+            Functions.printStackTrace(problem, logger);
+            var threadDumpFile = getThreadDumpFile();
+            if (threadDumpFile.exists()) {
+                logger.println("Virtual thread dump at save time ----");
+                try (FileReader fr = new FileReader(threadDumpFile, StandardCharsets.UTF_8);
+                     BufferedReader br = new BufferedReader(fr)) {
+                    br.lines().forEach(logger::println);
+                }
+            }
         } catch (Exception x) {
             LOGGER.log(Level.WARNING, x, () -> "failed to log problem to " + owner);
         }
@@ -970,6 +981,10 @@ public class CpsFlowExecution extends FlowExecution implements BlockableResume {
      */
     /*package*/ File getProgramDataFile() throws IOException {
         return new File(owner.getRootDir(), "program.dat");
+    }
+
+    File getThreadDumpFile() throws IOException {
+        return new File(owner.getRootDir(), "thread-dump.txt");
     }
 
     /**

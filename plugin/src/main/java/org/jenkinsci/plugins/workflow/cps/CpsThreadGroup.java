@@ -43,8 +43,12 @@ import hudson.Main;
 import hudson.Util;
 import hudson.model.Result;
 import hudson.util.XStream2;
+import java.io.FileWriter;
+import java.nio.charset.StandardCharsets;
 import jenkins.model.Jenkins;
+import jenkins.util.SystemProperties;
 import jenkins.util.Timer;
+import org.apache.commons.io.IOUtils;
 import org.jenkinsci.plugins.workflow.actions.ErrorAction;
 import org.jenkinsci.plugins.workflow.cps.persistence.PersistIn;
 import org.jenkinsci.plugins.workflow.cps.persistence.PersistenceContext;
@@ -563,11 +567,20 @@ public final class CpsThreadGroup implements Serializable {
             return;
         }
         File f = execution.getProgramDataFile();
-        saveProgram(f);
+        File threadDumpFile = null;
+        if (SystemProperties.getBoolean(CpsThreadGroup.class + ".captureThreadDump")) {
+            threadDumpFile = execution.getThreadDumpFile();
+        }
+        saveProgram(f, threadDumpFile);
     }
 
     @CpsVmThreadOnly
     public void saveProgram(File f) throws IOException {
+        saveProgram(f, null);
+    }
+
+    @CpsVmThreadOnly
+    private void saveProgram(@NonNull File f, @CheckForNull File threadDump) throws IOException {
         File dir = f.getParentFile();
         File tmpFile = File.createTempFile("atomic",null, dir);
 
@@ -588,8 +601,18 @@ public final class CpsThreadGroup implements Serializable {
             try (RiverWriter w = new RiverWriter(tmpFile, execution.getOwner(), pickleFactories)) {
                 w.writeObject(this);
             }
+            File threadDumpTempFile = null;
+            if (threadDump != null) {
+                threadDumpTempFile = File.createTempFile("threaddump-atomic",null, threadDump.getParentFile());
+                try (FileWriter fw = new FileWriter(threadDumpTempFile, StandardCharsets.UTF_8)) {
+                    IOUtils.write(execution.getThreadDump().toString(), fw);
+                }
+            }
             serializedOK = true;
             Files.move(tmpFile.toPath(), f.toPath(), StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
+            if (threadDump != null) {
+                Files.move(threadDumpTempFile.toPath(), threadDump.toPath(), StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
+            }
             LOGGER.log(Level.FINE, "program state saved");
         } catch (RuntimeException e) {
             propagateErrorToWorkflow(e);
